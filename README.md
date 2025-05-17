@@ -31,8 +31,7 @@ A powerful and flexible image compression tool that helps you reduce image file 
 
 1. Clone or download this repository:
    ```
-   git clone https://github.com/yourusername/tiny-images.git
-   cd tiny-images
+   git clone https://github.com/includeleec/compress-images
    ```
 
 2. Install the required packages:
