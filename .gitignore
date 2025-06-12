@@ -1,0 +1,14 @@
+/images
+/test_images
+/node_modules
+/dist
+
+/__pycache__/
+/.DS_Store
+/.env
+/.vscode
+/.idea
+/.pytest_cache
+/.mypy_cache
+/.coverage
+/.coverage.*

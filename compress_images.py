@@ -54,6 +54,13 @@ except ImportError:
 # Supported image formats
 SUPPORTED_FORMATS = ['.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tiff']
 
+# Size presets
+SIZE_PRESETS = {
+    'sm': 640,
+    'md': 768,
+    'lg': 1024
+}
+
 # Helper functions for colored output
 def print_info(message):
     """Print an info message, with color if available."""
@@ -92,20 +99,23 @@ def print_header(message):
         print(message)
         print("=" * 60)
 
-def sanitize_filename(filename):
-    """Generate a random number with '-compress' suffix for the compressed image filename."""
-    # Get the extension from the original filename
-    extension = os.path.splitext(filename)[1]
+def generate_filename(original_filename, size_preset, output_format):
+    """Generate filename with size suffix and format: original_name.size.format"""
+    # Get the base name without extension
+    base_name = os.path.splitext(original_filename)[0]
+    
+    # Determine the output extension
+    if output_format and output_format != 'original':
+        extension = f'.{output_format}'
+    else:
+        extension = os.path.splitext(original_filename)[1]
+    
+    # Create the new filename: original_name.size.extension
+    new_filename = f"{base_name}.{size_preset}{extension}"
+    
+    return new_filename
 
-    # Generate a random number between 10000 and 99999
-    random_number = random.randint(10000, 99999)
-
-    # Create the new filename with the random number and "-compress" suffix
-    sanitized = f"{random_number}-compress"
-
-    return sanitized + extension
-
-def compress_image(input_path, output_path, quality=85, max_width=1920, output_format=None, preserve_original=False):
+def compress_image(input_path, output_path, quality=85, max_width=1920, output_format=None, preserve_original=False, size_preset='lg'):
     """Compress an image with the specified settings."""
     try:
         with Image.open(input_path) as img:
@@ -186,7 +196,7 @@ def compress_image(input_path, output_path, quality=85, max_width=1920, output_f
         print_error(f"Error processing {input_path}: {e}")
         return {'success': False, 'error': str(e)}
 
-def process_directory(directory, quality, max_width, output_format, preserve_original=False):
+def process_directory(directory, quality, max_width, output_format, preserve_original=False, size_preset='lg', in_place=False):
     """Process all images in a directory and its subdirectories."""
     directory = Path(directory)
     if not directory.exists():
@@ -226,9 +236,9 @@ def process_directory(directory, quality, max_width, output_format, preserve_ori
         iterator = image_paths
         print_info("Processing images...")
 
-    # Create a subdirectory for compressed images with format "compress-[size]-[format]-[quality]"
+    # Create a subdirectory for compressed images with format "compress-[size_preset]-[format]-[quality]"
     format_name = output_format if output_format != 'original' else 'original'
-    compress_dir_name = f"compress-{max_width}-{format_name}-{quality}"
+    compress_dir_name = f"compress-{size_preset}-{format_name}-{quality}"
 
     for path in iterator:
         stats['processed'] += 1
@@ -237,27 +247,28 @@ def process_directory(directory, quality, max_width, output_format, preserve_ori
         relative_path = path.relative_to(directory)
         parent_dir = relative_path.parent
 
-        # Create a compress subdirectory in the same directory as the original image
-        compress_subdir = parent_dir / compress_dir_name
-
-        # Generate the new filename
-        sanitized_name = sanitize_filename(relative_path.name)
-
-        # Set the output path to be in the compress subdirectory
-        output_path = directory / compress_subdir / sanitized_name
-
-        # Change extension if output format is specified
-        if output_format and output_format != 'original':
-            output_path = output_path.with_suffix(f'.{output_format}')
-
-        # Create parent directory if it doesn't exist
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        if in_place:
+            # Generate the new filename with size suffix for in-place compression
+            new_filename = generate_filename(relative_path.name, size_preset, output_format)
+            # Set the output path to be in the same directory as the original image
+            output_path = directory / parent_dir / new_filename
+            # Create parent directory if it doesn't exist (should already exist)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            # Create a compress subdirectory in the same directory as the original image
+            compress_subdir = parent_dir / compress_dir_name
+            # Generate the new filename with size suffix
+            new_filename = generate_filename(relative_path.name, size_preset, output_format)
+            # Set the output path to be in the compress subdirectory
+            output_path = directory / compress_subdir / new_filename
+            # Create parent directory if it doesn't exist
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Compress the image
         if not PROGRESS_BAR_SUPPORT:
             print_info(f"[{stats['processed']}/{total_images}] Processing: {path}")
 
-        result = compress_image(path, output_path, quality, max_width, output_format, preserve_original)
+        result = compress_image(path, output_path, quality, max_width, output_format, preserve_original, size_preset)
 
         # Update statistics
         if isinstance(result, dict) and result.get('success', False):
@@ -291,7 +302,7 @@ def process_directory(directory, quality, max_width, output_format, preserve_ori
 
     # Generate report file
     format_name = output_format if output_format != 'original' else 'original'
-    compress_dir_name = f"compress-{max_width}-{format_name}-{quality}"
+    compress_dir_name = f"compress-{size_preset}-{format_name}-{quality}"
     report_path = directory / f"compression_report_{timestamp}.txt"
     try:
         with open(report_path, 'w') as f:
@@ -299,10 +310,13 @@ def process_directory(directory, quality, max_width, output_format, preserve_ori
             f.write("=" * 60 + "\n\n")
             f.write(f"Directory: {directory}\n")
             f.write(f"Quality: {quality}\n")
-            f.write(f"Maximum width: {max_width}px\n")
+            f.write(f"Size preset: {size_preset} ({max_width}px)\n")
             f.write(f"Output format: {output_format}\n")
             f.write(f"Preserve originals: {preserve_original}\n")
-            f.write(f"Compressed images directory: {compress_dir_name}/\n\n")
+            if in_place:
+                f.write(f"Compressed images location: Same directory as originals\n\n")
+            else:
+                f.write(f"Compressed images directory: {compress_dir_name}/\n\n")
 
             f.write(f"Total images processed: {stats['processed']}\n")
             f.write(f"Successfully compressed: {stats['successful']}\n")
@@ -351,19 +365,42 @@ def main():
         except ValueError:
             print_warning("Please enter a valid number.")
 
-    # Get max width
+    # Get size preset
+    print_info("\nSize preset options:")
+    print("1. sm - Small (640px width)")
+    print("2. md - Medium (768px width)")
+    print("3. lg - Large (1024px width, default)")
+    print("4. Custom - Enter your own width")
+    
     while True:
-        width_input = input("Enter maximum width in pixels (default 1920): ").strip()
-        if not width_input:
-            max_width = 1920
+        size_input = input("Choose size preset (1-4): ").strip()
+        if not size_input or size_input == '3':
+            size_preset = 'lg'
+            max_width = SIZE_PRESETS['lg']
             break
-        try:
-            max_width = int(width_input)
-            if max_width > 0:
-                break
-            print_warning("Width must be a positive number.")
-        except ValueError:
-            print_warning("Please enter a valid number.")
+        elif size_input == '1':
+            size_preset = 'sm'
+            max_width = SIZE_PRESETS['sm']
+            break
+        elif size_input == '2':
+            size_preset = 'md'
+            max_width = SIZE_PRESETS['md']
+            break
+        elif size_input == '4':
+            # Custom width
+            while True:
+                width_input = input("Enter maximum width in pixels: ").strip()
+                try:
+                    max_width = int(width_input)
+                    if max_width > 0:
+                        size_preset = f"custom{max_width}"
+                        break
+                    print_warning("Width must be a positive number.")
+                except ValueError:
+                    print_warning("Please enter a valid number.")
+            break
+        else:
+            print_warning("Please enter a valid option (1-4).")
 
     # Get output format
     print_info("\nOutput format options:")
@@ -392,18 +429,37 @@ def main():
     # Ask if user wants to preserve original files
     preserve_original = input("\nPreserve original files in an 'originals' subfolder? (y/n, default: n): ").strip().lower() == 'y'
 
+    # Ask if user wants in-place compression
+    print_info("\nOutput location options:")
+    print("1. Create subdirectory (default, recommended for organization)")
+    print("2. Save in same directory as original images (in-place)")
+    
+    while True:
+        location_input = input("Choose output location (1-2): ").strip()
+        if not location_input or location_input == '1':
+            in_place = False
+            break
+        elif location_input == '2':
+            in_place = True
+            break
+        else:
+            print_warning("Please enter a valid option (1-2).")
+
     # Create the output directory name
     format_name = output_format if output_format != 'original' else 'original'
-    compress_dir_name = f"compress-{max_width}-{format_name}-{quality}"
+    compress_dir_name = f"compress-{size_preset}-{format_name}-{quality}"
 
     # Confirm settings
     print_info("\nCompression Settings:")
     print(f"Directory: {directory}")
     print(f"Quality: {quality}")
-    print(f"Maximum width: {max_width}px")
+    print(f"Size preset: {size_preset} ({max_width}px)")
     print(f"Output format: {output_format}")
     print(f"Preserve originals: {'Yes' if preserve_original else 'No'}")
-    print(f"Compressed images will be saved in: {compress_dir_name}/ subdirectory")
+    if in_place:
+        print(f"Compressed images will be saved in: Same directory as originals")
+    else:
+        print(f"Compressed images will be saved in: {compress_dir_name}/ subdirectory")
 
     confirm = input("\nProceed with these settings? (y/n): ").strip().lower()
     if confirm != 'y':
@@ -412,7 +468,7 @@ def main():
 
     # Process the directory
     try:
-        process_directory(directory, quality, max_width, output_format, preserve_original)
+        process_directory(directory, quality, max_width, output_format, preserve_original, size_preset, in_place)
         print_success("\nCompression process completed!")
     except KeyboardInterrupt:
         print_warning("\nOperation cancelled by user.")
